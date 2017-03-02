@@ -45,7 +45,7 @@ class Node:
         self.state = waitForACK
         for x in range(len(self.nodeInRange)):
             self.nodeInRange[x].receivePacket(self.timeToNextTask)
-        return 
+        return self
             
     
     def receivePacket(self, dur):
