@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[10]:
+# In[1]:
 
 class Node:
     'Common base class for all nodes'
@@ -32,16 +32,14 @@ class Node:
         self.packetLength = packetLength
         self.samplingRate = samplingRate
         self.nodeInRange = []
-        self.group = -1
-        self.AID = -1
-        self.state = Node.waitDIFS
+        self.channelBusyCount = 0
+        self.state = Global.waitDIFS
         self.timeToNextTask = Eventlist.currentTime + DIFS
         self.nav = 0
         self.checkACK = 0
         self.backoffStage = 4
         self.backoffTime = randint(0, 2 ** max(self.backoffStage, 10))
         self.tranTime = fix((packetLength*8)/52)
-        self.collisionTimes = 0
         self.loop = loop
         Node.nodeCounts += 1
         
@@ -51,8 +49,8 @@ class Node:
         to other nodes: message "transmitting"
         '''
         Node.packetCount += 1
-        self.timeToNextTask = Eventlist.currentTime + self.tranTime + SIFS
-        self.state = Node.sendPacket
+        self.timeToNextTask = Eventlist.currentTime + self.tranTime
+        self.channelState = Node.sendPacket
         for x in range(len(self.nodeInRange)):
             self.nodeInRange[x].receivePacket(self.tranTime)
         return self
@@ -60,14 +58,23 @@ class Node:
     
     def receivePacket(self, time):
         'Carrier sense'
-        if self.state == Node.READY: #While sending packet simultaneously
+        if self.channelState == Node.READY: #While sending packet simultaneously
             print "sending packet simultaneously\n"
             return
-        if self.state == Node.receiveACK:  #collision
+        if self.channelState == Node.receiveACK:  #collision
             self.checkACK = 0
-        self.state = Node.channelBusy
+        self.channelState = Node.channelBusy
         if self.timeToNextTask < (Eventlist.currentTime+ time):
             self.timeToNextTask = Eventlist.currentTime + time
+            
+        '''rewrite'''    
+        self.channelBusyCount += 1
+        if self.state != Global.RAEDY:
+            self.state = Global.carrierSense
+            self.timeToNextTask = Eventlist.maxTime+1
+        if self.channelBusyCount >1:
+            self.nav = 0
+            
         
     def changeState(self):
         "change state when it's the node's turn"
@@ -78,11 +85,15 @@ class Node:
             countDownBackoff: self.readyToWork(),
             channelBusy: self.setNav(),
             waitOthersACK: self.toBackoff()            
-        }[self.state]
+        }[self.channelState]
     
     def toWaitResponse(self):
-        self.state = Node.waitResponse
-        self.timeToNextTask = Eventlist.currentTime + ACKTime
+        self.channelState = Node.waitResponse
+        self.timeToNextTask = Eventlist.currentTime + Global.nav
+        for x in range(len(self.nodeInRange)):
+            self.nodeInRange[x].channelBusyCount -= 1
+            self.nodeInRange[x].timeToNextTask = Eventlist.currentTime + self.nodeInRange[x].nav
+            self.nodeInRange[x].nav = Global.nav
         
     def toCheckACK(self):
         'check whether ACK is transmitted sucessfully'
@@ -90,11 +101,11 @@ class Node:
         if self.checkACK == 1:
             'transmitted sucessfully'
             if self.loop:
-                self.state = Node.waitDIFS
+                self.channelState = Node.waitDIFS
                 self.timeToNextTask = Eventlist.currentTime + DIFS
             else:
-                self.state = Node.HALT
-                self.timeToNextTask = Eventlist.maxTime
+                self.channelState = Node.HALT
+                self.timeToNextTask = Eventlist.maxTime+1
         elif self.checkACK == 0:
             Eventlist.collision += 1
             self.collisionTimes += 1
@@ -103,16 +114,16 @@ class Node:
     def readyToWork(self):
         self.backoffStage = 3
         self.backoffTime = 0
-        self.state = Node.READY
+        self.channelState = Node.READY
         
     def setNav(self):
         self.nav = SIFS + ACKTime + DIFS
-        self.state = Node.waitOthersACK
+        self.channelState = Node.waitOthersACK
         self.timeToNextTask = Eventlist.currentTime + self.nav
         
     def toBackOff(self):
         self.nav = 0
-        self.state = Node.countDownBackoff
+        self.channelState = Node.countDownBackoff
         if self.backoffTime == 0:
             self.backoffStage += 1
             self.backoffTime = randint(0, 2 ** max(self.backoffStage, 10))
@@ -155,28 +166,35 @@ class AP:
         self.x = x
         self.y = y
         self.group = []
-        self.state = AP.IDLE
+        self.channelState = AP.IDLE
         self.timeToNextTask = Eventlist.maxTime
         self.nodeInRange = []
         for groups in range(numOfGroup):
             self.group.append([0])
             
+            
+            
+            '''
+            需要重寫!
+            >>>>>>>因應送封包時收封包
+            1.將狀態分為收&送
+            '''
     def receivePacket(self, node):
         'receivePacket'
-        if self.state == AP.IDLE:
-            self.state = AP.channelBusy
+        if self.channelState == AP.IDLE:
+            self.channelState = AP.channelBusy
             self.timeToNextTask = Eventlist.currentTime + node.tranTime + SIFS
             self.respondTarget = node
-        elif self.state == AP.channelBusy:
+        elif self.channelState == AP.channelBusy:
             'collision'
-            self.state = AP.IDLE
+            self.channelState = AP.IDLE
             self.respondTarget = 0
-            self.timeToNextTask = Eventlist.maxTime
+            self.timeToNextTask = Eventlist.maxTime+1  # wrong!!!
             
     def sendACK(self):
         'send ACK'
         self.timeToNextTask = Eventlist.current + ACKTime
-        self.state = AP.sendPacket
+        self.channelState = AP.sendPacket
         for x in range(len(self.nodeInRange)):
             self.nodeInRange[x].receivePacket(ACKTime)
         self.respondTarget.checkACK = 1
@@ -186,7 +204,7 @@ class AP:
             IDLE: self.processEnd(),
             sendPacket: self.toIDLE(),
             channelBusy: self.readyToWork(),
-        }[self.state]
+        }[self.channelState]
     
     def processEnd(self):
         print "process end"
@@ -194,11 +212,11 @@ class AP:
     
     def toIDLE(self):
         self.respondTarget = 0
-        self.state = IDLE
+        self.channelState = IDLE
         self.timeToNextTask = Eventlist.maxTime
         
     def readyToWork(self):
-        self.state = READY
+        self.channelState = READY
         
     def calcRange(self, node):
         self.nodeInRange.append(node)
@@ -237,7 +255,7 @@ for node1 in range(1, len(points)):
         points[node1].calcRange(points[node2])        
     #points[node1].displayNodesInRange()
     
-while(Eventlist.currentTime <= Eventlist.maxTime):
+while(Eventlist.currentTime < Eventlist.maxTime):
     
 
 
@@ -256,10 +274,34 @@ class Eventlist:
     maxTime = 0
     def __init__(self, endTime):
         self.event = []
+        self.workList = []
         Eventlist.maxTime = fix(endTime*1000000/52)
+        self.nextTime = Eventlist.maxTime
+        
         
     def insert(self, e):
         self.event.append(e)
+        
+    def findNextTimeEvents(self, points):
+        for pointCount in range(len(points))
+            if self.nextTime > points[pointCount].timeToNextTask:
+                self.nextTime = points[pointCount].timeToNextTask
+                self.event = [points[pointCount]]
+            elif self.nextTime == points[pointCount].timeToNextTask:
+                self.event.append(points[pointCount])
+    
+    def goToNextTime(self):
+        self.currentTime = self.nextTime
+        self.nextTime = Eventlist.maxTime
+        
+    def changeState(self):
+        for x in range(len(event)):
+            event[x].changeState()
+            if event[x].state == Node.READY:
+                self.workList.append(event[x])
+            
+    def checkAP(self):
+        
     
     def showList():
         for x in range(len(event)):
@@ -296,5 +338,18 @@ print test2.x
 
 # In[ ]:
 
-
+class Global:
+    SIFS = 3
+    DIFS = 5
+    ACKTime = 5
+    sendPacket = 531 
+    waitDIFS = 564 
+    waitResponse = 315 #wait for ACK
+    countDownBackoff = 615
+    channelBusy = 213
+    waitOthersACK = 843
+    READY = 534
+    HALT = 5843
+    collision = 0
+    IDLE = 655
 
