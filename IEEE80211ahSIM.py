@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[60]:
 
 class Node:
     'Common base class for all nodes'
@@ -9,24 +9,14 @@ class Node:
     Time unit: slot time = 52
     data rate: 1 Mbps
     '''
-    sendPacket = 531 
-    waitDIFS = 564 
-    waitResponse = 315 #wait for ACK
-    countDownBackoff = 615
-    channelBusy = 213
-    waitOthersACK = 843
-    READY = 534
-    HALT = 5843
     
     nodeCounts = 0
-    packetCount = 0
+    #packetCount = 0
     DEVICE = "node"
-    SIFS = 3
-    DIFS = 5
-    ACKTime = 5
+    
     from random import randint
     
-    def __init__(self, x, y, packetLength, samplingRate, loop):
+    def __init__(self, x, y, packetLength, samplingRate, AID):
         self.x = x
         self.y = y
         self.packetLength = packetLength
@@ -35,12 +25,15 @@ class Node:
         self.channelBusyCount = 0
         self.state = Global.waitDIFS
         self.timeToNextTask = Eventlist.currentTime + DIFS
-        self.nav = 0
+        self.nav = Global.nav
         self.checkACK = 0
-        self.backoffStage = 4
-        self.backoffTime = randint(0, 2 ** max(self.backoffStage, 10))
+        self.backoffStage = 3
+        self.backoffTime = 0#randint(0, 2 ** max(self.backoffStage, 10))
         self.tranTime = fix((packetLength*8)/52)
-        self.loop = loop
+        self.queuingData = 100#randint(0, 1000)
+        self.collision = 0
+        self.AID = AID
+        self.transmittTimes = 0
         Node.nodeCounts += 1
         
     def sendPacket(self):
@@ -48,82 +41,108 @@ class Node:
         to AP: send request
         to other nodes: message "transmitting"
         '''
-        Node.packetCount += 1
+        Statistic.packetCount += 1
+        self.transmittTimes += 1
         self.timeToNextTask = Eventlist.currentTime + self.tranTime
-        self.channelState = Node.sendPacket
+        self.state = Global.sendPacket
+        print "Node: %d, send packet" % self.AID
         for x in range(len(self.nodeInRange)):
-            self.nodeInRange[x].receivePacket(self.tranTime)
+            self.nodeInRange[x].receivePacket()
         return self
             
     
-    def receivePacket(self, time):
+    def receivePacket(self):
         'Carrier sense'
-        if self.channelState == Node.READY: #While sending packet simultaneously
+        '''if self.state == Node.READY: #While sending packet simultaneously
             print "sending packet simultaneously\n"
             return
-        if self.channelState == Node.receiveACK:  #collision
+        if self.state == Node.receiveACK:  #collision
             self.checkACK = 0
-        self.channelState = Node.channelBusy
+        self.state = Node.channelBusy
         if self.timeToNextTask < (Eventlist.currentTime+ time):
-            self.timeToNextTask = Eventlist.currentTime + time
+            self.timeToNextTask = Eventlist.currentTime + time'''
             
         '''rewrite'''    
         self.channelBusyCount += 1
-        if self.state != Global.RAEDY:
+        if (self.state == Global.waitDIFS) or (self.state == Global.backoff):
             self.state = Global.carrierSense
+            #print "Node: %d, carrier sense" % self.AID
             self.timeToNextTask = Eventlist.maxTime+1
         if self.channelBusyCount >1:
             self.nav = 0
+            self.checkACK = 0
             
         
     def changeState(self):
         "change state when it's the node's turn"
+        '''
         return {
-            sendPacket: self.toWaitResponse(),
-            waitResponse: self.toCheckACK(),
-            waitDIFS: self.toBackoff(),
-            countDownBackoff: self.readyToWork(),
-            channelBusy: self.setNav(),
-            waitOthersACK: self.toBackoff()            
-        }[self.channelState]
+            Global.sendPacket: self.toWaitResponse(),  
+            Global.waitResponse: self.toCheckACK(),
+            Global.waitDIFS: self.toBackoff(),  
+            Global.backoff: self.readyToWork(),        
+        }[self.state]'''
+        if self.state == Global.sendPacket:
+            return self.toWaitResponse()
+        elif self.state == Global.waitResponse:
+            return self.toCheckACK()
+        elif self.state == Global.waitDIFS:
+            return self.toBackoff()
+        elif self.state == Global.backoff:
+            return self.readyToWork()
     
     def toWaitResponse(self):
-        self.channelState = Node.waitResponse
+        self.state = Global.waitResponse
+        print "Node: %d, wait response" % self.AID
         self.timeToNextTask = Eventlist.currentTime + Global.nav
         for x in range(len(self.nodeInRange)):
-            self.nodeInRange[x].channelBusyCount -= 1
-            self.nodeInRange[x].timeToNextTask = Eventlist.currentTime + self.nodeInRange[x].nav
-            self.nodeInRange[x].nav = Global.nav
+            self.nodeInRange[x].channelUserDecrease()
+            
+    def channelUserDecrease(self):
+        self.channelBusyCount -= 1
+        if (self.channelBusyCount < 1) and (self.state == Global.carrierSense):
+            self.state = Global.waitDIFS
+            self.timeToNextTask = Eventlist.currentTime + self.nav + Global.DIFS
+            self.nav = Global.nav
+        
         
     def toCheckACK(self):
         'check whether ACK is transmitted sucessfully'
+        #print "Node: %d, check ACK" % self.AID
         'if failed => toBackoff'
         if self.checkACK == 1:
+            print "Node: %d, transmitt success!" % self.AID
             'transmitted sucessfully'
-            if self.loop:
-                self.channelState = Node.waitDIFS
-                self.timeToNextTask = Eventlist.currentTime + DIFS
+            Statistic.success += 1
+            self.queuingData -= 1
+            if self.queuingData > 0:
+                if self.channelBusyCount > 0:
+                    self.state = Global.carrierSense
+                    self.timeToNextTask = Eventlist.maxTime + 1
+                else:
+                    self.state = Global.waitDIFS
+                    self.timeToNextTask = Eventlist.currentTime + Global.DIFS
             else:
-                self.channelState = Node.HALT
+                self.state = Global.HALT
                 self.timeToNextTask = Eventlist.maxTime+1
+            self.checkACK = 0
         elif self.checkACK == 0:
-            Eventlist.collision += 1
-            self.collisionTimes += 1
-            self.toBackoff()
+            print "Node: %d, collision occured" % self.AID
+            self.collision += 1
+            Statistic.collisionTimes += 1
+            self.state = Global.waitDIFS
+            self.timeToNextTask = Eventlist.currentTime + Global.DIFS
         
     def readyToWork(self):
         self.backoffStage = 3
         self.backoffTime = 0
-        self.channelState = Node.READY
+        self.state = Global.READY
         
-    def setNav(self):
-        self.nav = SIFS + ACKTime + DIFS
-        self.channelState = Node.waitOthersACK
-        self.timeToNextTask = Eventlist.currentTime + self.nav
         
-    def toBackOff(self):
-        self.nav = 0
-        self.channelState = Node.countDownBackoff
+    def toBackoff(self):
+        #self.nav = 0
+        print "Node: %d, wait backoff" % self.AID
+        self.state = Global.backoff
         if self.backoffTime == 0:
             self.backoffStage += 1
             self.backoffTime = randint(0, 2 ** max(self.backoffStage, 10))
@@ -148,63 +167,63 @@ class Node:
         
 
 
-# In[13]:
+# In[61]:
 
 class AP:
     'common access point'
-    DIVICE = "access point"
-    SIFS = 3
-    DIFS = 5
-    ACKTime = 5
-    
-    IDLE = 655
-    sendPacket = 531 
-    channelBusy = 213
-    READY = 534
+    #DIVICE = "access point"
+
     
     def __init__(self, x, y, numOfGroup):
         self.x = x
         self.y = y
         self.group = []
-        self.channelState = AP.IDLE
-        self.timeToNextTask = Eventlist.maxTime
+        self.channelBusyCount = 0
+        self.state = Global.IDLE
+        self.timeToNextTask = Eventlist.maxTime + 1
         self.nodeInRange = []
+        self.DEVICE = "access point"
         for groups in range(numOfGroup):
             self.group.append([0])
             
             
             
             '''
-            需要重寫!
-            >>>>>>>因應送封包時收封包
-            1.將狀態分為收&送
+            送封包當下不收封包
             '''
     def receivePacket(self, node):
         'receivePacket'
-        if self.channelState == AP.IDLE:
-            self.channelState = AP.channelBusy
-            self.timeToNextTask = Eventlist.currentTime + node.tranTime + SIFS
-            self.respondTarget = node
-        elif self.channelState == AP.channelBusy:
-            'collision'
-            self.channelState = AP.IDLE
-            self.respondTarget = 0
-            self.timeToNextTask = Eventlist.maxTime+1  # wrong!!!
+        self.channelBusyCount += 1
+        if self.state != Global.sendPacket:
+            if self.channelBusyCount == 1:
+                self.state = Global.carrierSense
+                self.timeToNextTask = Eventlist.currentTime + node.tranTime + SIFS
+                self.respondTarget = node
+                print "AP response Target: %d" % node.AID
+            else:
+                self.respondTarget = 0
+                print "prefer collision"
+                self.timeToNextTask = max(self.timeToNextTask, (Eventlist.currentTime + node.tranTime + SIFS))
             
-    def sendACK(self):
+    def sendPacket(self):
         'send ACK'
-        self.timeToNextTask = Eventlist.current + ACKTime
-        self.channelState = AP.sendPacket
+        print "AP send ACK to %d" % self.respondTarget.AID
+        self.timeToNextTask = Eventlist.currentTime + ACKTime
+        self.state = Global.sendPacket
         for x in range(len(self.nodeInRange)):
-            self.nodeInRange[x].receivePacket(ACKTime)
+            self.nodeInRange[x].receivePacket()
         self.respondTarget.checkACK = 1
+        self.respondTarget = 0
         
     def changeState(self):
-        return {
-            IDLE: self.processEnd(),
-            sendPacket: self.toIDLE(),
-            channelBusy: self.readyToWork(),
-        }[self.channelState]
+        '''return {
+            Global.sendPacket: self.toIDLE(),
+            Global.carrierSense: self.checkRespondTarget(),
+        }[self.state]'''
+        if self.state == Global.sendPacket:
+            return self.toIDLE()
+        elif self.state == Global.carrierSense:
+            return self.checkRespondTarget()
     
     def processEnd(self):
         print "process end"
@@ -212,11 +231,17 @@ class AP:
     
     def toIDLE(self):
         self.respondTarget = 0
-        self.channelState = IDLE
-        self.timeToNextTask = Eventlist.maxTime
+        self.state = Global.IDLE
+        self.timeToNextTask = Eventlist.maxTime + 1
+        for x in range(len(self.nodeInRange)):
+            self.nodeInRange[x].channelUserDecrease()
         
-    def readyToWork(self):
-        self.channelState = READY
+    def checkRespondTarget(self):
+        self.channelBusyCount = 0
+        if self.respondTarget == 0:
+            self.toIDLE()
+        else:
+            self.state = Global.READY       
         
     def calcRange(self, node):
         self.nodeInRange.append(node)
@@ -226,49 +251,10 @@ class AP:
         
 
 
-# In[17]:
+# In[62]:
 
-from random import choice, randint
 from numpy import *
-SIFS = 3
-DIFS = 5
-ACKTime = 5
-RADIUS = 1000
-SQUERE_RADIUS = RADIUS ** 2
-packetLengthList = [32, 64, 128]
-samplingRateList = [2, 4, 8, 16]
-points = []
-Node.nodeCounts = 0
-
-eventController = Eventlist(1)
-
-points.append(AP(0,0,4))
-
-while Node.nodeCounts < 10:
-    x, y = randint(-RADIUS,RADIUS), randint(-RADIUS,RADIUS)
-    if (x*x + y*y) <= SQUERE_RADIUS:
-        points.append(Node(x, y, 32, choice(samplingRateList),1))        
-
-for node1 in range(1, len(points)):
-    points[0].calcRange(points[node1])
-    for node2 in range(node1+1, len(points)):
-        points[node1].calcRange(points[node2])        
-    #points[node1].displayNodesInRange()
-    
-while(Eventlist.currentTime < Eventlist.maxTime):
-    
-
-
-# In[23]:
-
-#print points[5].timeToNextTask
-print points[:]
-
-
-# In[15]:
-
 class Eventlist:
-    from numpy import *
     currentTime = 0
     collision = 0
     maxTime = 0
@@ -283,7 +269,9 @@ class Eventlist:
         self.event.append(e)
         
     def findNextTimeEvents(self, points):
-        for pointCount in range(len(points))
+        self.event = []
+        self.workList = []
+        for pointCount in range(len(points)):
             if self.nextTime > points[pointCount].timeToNextTask:
                 self.nextTime = points[pointCount].timeToNextTask
                 self.event = [points[pointCount]]
@@ -291,16 +279,23 @@ class Eventlist:
                 self.event.append(points[pointCount])
     
     def goToNextTime(self):
-        self.currentTime = self.nextTime
+        Eventlist.currentTime = self.nextTime
         self.nextTime = Eventlist.maxTime
         
     def changeState(self):
-        for x in range(len(event)):
-            event[x].changeState()
-            if event[x].state == Node.READY:
-                self.workList.append(event[x])
-            
-    def checkAP(self):
+        for x in range(len(self.event)):
+            self.event[x].changeState()
+            #print "AID: %d , state: %d" % (self.event[x].AID, self.event[x].state)
+            if self.event[x].state == Global.READY:
+                self.workList.append(self.event[x])
+    
+    def sendTime(self, AP):
+        if len(self.workList)>0:
+            if self.workList[0].DEVICE == "access point":
+                self.workList[0].sendPacket()
+                del self.workList[0]            
+        for x in range(len(self.workList)):
+           AP.receivePacket(self.workList[x].sendPacket())
         
     
     def showList():
@@ -309,47 +304,92 @@ class Eventlist:
     
 
 
-# In[1]:
-
-class Test:
-    var = 'a'
-    def __init__(self, x):
-        self.x = x
-        
-    def find(self, value):
-        return {
-          'a': lambda x: x + 5,
-        }[value]
-        #print result
-        
-    def exec_a(self):
-        print "execute a"
-        self.x = 0
-    
-    def do(self, node):
-        node.find('a')
-        
-test1 = Test(1)
-test2 = Test(2)
-test1.do(test2)
-print test1.x
-print test2.x
-
-
-# In[ ]:
+# In[63]:
 
 class Global:
     SIFS = 3
     DIFS = 5
     ACKTime = 5
+    
+    carrierSense = 635
     sendPacket = 531 
     waitDIFS = 564 
     waitResponse = 315 #wait for ACK
-    countDownBackoff = 615
-    channelBusy = 213
-    waitOthersACK = 843
+    backoff = 615
     READY = 534
     HALT = 5843
-    collision = 0
     IDLE = 655
+    
+    nav = SIFS + ACKTime
+
+
+# In[64]:
+
+class Statistic:
+    
+    packetCount = 0
+    collisionTimes = 0
+    success = 0
+
+
+# In[65]:
+
+from random import choice, randint
+from numpy import *
+SIFS = 3
+DIFS = 5
+ACKTime = 5
+RADIUS = 1000
+SQUERE_RADIUS = RADIUS ** 2
+packetLengthList = [32, 64, 128]
+samplingRateList = [2, 4, 8, 16]
+points = []
+Node.nodeCounts = 0
+
+eventController = Eventlist(5)
+
+points.append(AP(0,0,4))
+
+while Node.nodeCounts < 50:
+    x, y = randint(-RADIUS,RADIUS), randint(-RADIUS,RADIUS)
+    if (x*x + y*y) <= SQUERE_RADIUS:
+        points.append(Node(x, y, 128, choice(samplingRateList), Node.nodeCounts))        
+
+for node1 in range(1, len(points)):
+    points[0].calcRange(points[node1])
+    for node2 in range(node1+1, len(points)):
+        points[node1].calcRange(points[node2])        
+    #points[node1].displayNodesInRange()
+    
+while(Eventlist.currentTime < Eventlist.maxTime):
+#for x in range(10):    
+    eventController.findNextTimeEvents(points)
+    eventController.goToNextTime()
+    print Eventlist.currentTime
+    eventController.changeState()
+    eventController.sendTime(points[0])
+
+print "end"
+
+
+# In[66]:
+
+print Statistic.packetCount
+print Statistic.collisionTimes
+print Statistic.success
+for x in range(1,len(points)):
+    print points[x].transmittTimes
+
+
+# In[91]:
+
+#print points[5].timeToNextTask
+#print points[:]
+from numpy import *
+print randint(1, 2 ** 10)
+print 2** 4
+
+test = [1,2,3,4,5]
+del test[0]
+print test[0]
 
