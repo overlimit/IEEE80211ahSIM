@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[12]:
+# In[255]:
 
 class Node:
     'Common base class for all nodes'
@@ -23,14 +23,14 @@ class Node:
         self.samplingRate = samplingRate
         self.nodeInRange = []
         self.channelBusyCount = 0
-        self.state = Global.waitDIFS
-        self.timeToNextTask = Global.currentTime + DIFS
+        self.state = Global.waitDIFS#Global.HALT
+        self.timeToNextTask = Global.currentTime + Global.DIFS#Global.maxTime
         self.nav = Global.nav
         self.checkACK = 0
         self.backoffStage = Global.contentionWindow
         self.backoffTime = 0#randint(0, 2 ** min(self.backoffStage, 10))
-        self.tranTime = fix((packetLength*8)/52)
-        self.queuingData = 9999#randint(0, 1000)
+        self.tranTime = fix(((packetLength * 8) / Global.slotTime) / Global.dataRate)
+        self.queuingData = 1#randint(0, 1000)
         self.collision = 0
         self.AID = AID
         self.transmittTimes = 0
@@ -42,10 +42,11 @@ class Node:
         to other nodes: message "transmitting"
         '''
         Statistic.packetCount += 1
+        Global.channelUser += 1
         self.transmittTimes += 1
         self.timeToNextTask = Global.currentTime + self.tranTime
         self.state = Global.sendPacket
-        print "Node: %d, send packet" % self.AID
+        #print "Node: %d, send packet" % self.AID
         for x in range(len(self.nodeInRange)):
             self.nodeInRange[x].receivePacket()
         return self
@@ -53,23 +54,13 @@ class Node:
     
     def receivePacket(self):
         'Carrier sense'
-        '''if self.state == Node.READY: #While sending packet simultaneously
-            print "sending packet simultaneously\n"
-            return
-        if self.state == Node.receiveACK:  #collision
-            self.checkACK = 0
-        self.state = Node.channelBusy
-        if self.timeToNextTask < (Global.currentTime+ time):
-            self.timeToNextTask = Global.currentTime + time'''
-            
-        '''rewrite'''    
         self.channelBusyCount += 1
         if (self.state == Global.waitDIFS) or (self.state == Global.backoff):
             if self.state == Global.backoff:
                 self.backoffTime = self.backoffTime - (Global.currentTime - self.backoffStartTime)
             self.state = Global.carrierSense
             #print "Node: %d, carrier sense" % self.AID
-            self.timeToNextTask = Eventlist.maxTime+1
+            self.timeToNextTask = Global.maxTime +1
         if self.channelBusyCount >1:
             self.nav = 0
             self.checkACK = 0
@@ -77,13 +68,6 @@ class Node:
         
     def changeState(self):
         "change state when it's the node's turn"
-        '''
-        return {
-            Global.sendPacket: self.toWaitResponse(),  
-            Global.waitResponse: self.toCheckACK(),
-            Global.waitDIFS: self.toBackoff(),  
-            Global.backoff: self.readyToWork(),        
-        }[self.state]'''
         if self.state == Global.sendPacket:
             return self.toWaitResponse()
         elif self.state == Global.waitResponse:
@@ -95,10 +79,11 @@ class Node:
     
     def toWaitResponse(self):
         self.state = Global.waitResponse
-        print "Node: %d, wait response" % self.AID
+        #print "Node: %d, wait response" % self.AID
         self.timeToNextTask = Global.currentTime + Global.nav
         for x in range(len(self.nodeInRange)):
             self.nodeInRange[x].channelUserDecrease()
+        Global.channelUser -= 1 
             
     def channelUserDecrease(self):
         self.channelBusyCount -= 1
@@ -115,28 +100,28 @@ class Node:
         'if failed => toBackoff'
         if self.checkACK == 1:
             self.backoffStage = Global.contentionWindow
-            print "Node: %d, transmitt success!" % self.AID
+            #print "Node: %d, transmitt success!" % self.AID
             'transmitted sucessfully'
             Statistic.success += 1
             self.queuingData -= 1
             if self.queuingData > 0:
                 if self.channelBusyCount > 0:
                     self.state = Global.carrierSense
-                    self.timeToNextTask = Eventlist.maxTime + 1
+                    self.timeToNextTask = Global.maxTime +1
                 else:
                     self.state = Global.waitDIFS
                     self.timeToNextTask = Global.currentTime + Global.DIFS
             else:
                 self.state = Global.HALT
-                self.timeToNextTask = Eventlist.maxTime+1
+                self.timeToNextTask = Global.maxTime +1
             self.checkACK = 0
         elif self.checkACK == 0:
-            print "Node: %d, collision occured" % self.AID
+            #print "Node: %d, collision occured" % self.AID
             self.collision += 1
             Statistic.collisionTimes += 1
             if self.channelBusyCount > 0:
                 self.state = Global.carrierSense
-                self.timeToNextTask = Eventlist.maxTime + 1
+                self.timeToNextTask = Global.maxTime +1
             else:
                 self.state = Global.waitDIFS
                 self.timeToNextTask = Global.currentTime + Global.DIFS
@@ -159,6 +144,12 @@ class Node:
         self.backoffStartTime = Global.currentTime
         #print "Node: %d, wait backoff: %d" % (self.AID, self.backoffTime)
         
+    def dataInterval(self):
+        self.queuingData += 1
+        if self.state == Global.HALT:
+            self.state = Global.waitDIFS
+            self.timeToNextTask = Global.currentTime + Global.DIFS
+        
     def calcRange(self, others):
         if (((self.x- others.x) ** 2) + ((self.y - others.y) ** 2)) <= 1000000:
             self.nodeInRange.append(others)
@@ -176,7 +167,7 @@ class Node:
         
 
 
-# In[13]:
+# In[256]:
 
 class AP:
     'common access point'
@@ -189,7 +180,7 @@ class AP:
         self.group = []
         self.channelBusyCount = 0
         self.state = Global.IDLE
-        self.timeToNextTask = Eventlist.maxTime + 1
+        self.timeToNextTask = Global.maxTime +1
         self.nodeInRange = []
         self.DEVICE = "access point"
         for groups in range(numOfGroup):
@@ -211,24 +202,21 @@ class AP:
                 #print "AP response Target: %d" % node.AID
             else:
                 self.respondTarget = 0
-                print "prefer collision"
+                #print "prefer collision"
                 self.timeToNextTask = max(self.timeToNextTask, (Global.currentTime + node.tranTime + SIFS))
             
     def sendPacket(self):
         'send ACK'
-        print "AP send ACK to %d" % self.respondTarget.AID
+        #print "AP send ACK to %d" % self.respondTarget.AID
         self.timeToNextTask = Global.currentTime + ACKTime
         self.state = Global.sendPacket
         for x in range(len(self.nodeInRange)):
             self.nodeInRange[x].receivePacket()
         self.respondTarget.checkACK = 1
         self.respondTarget = 0
+        Global.channelUser += 1
         
     def changeState(self):
-        '''return {
-            Global.sendPacket: self.toIDLE(),
-            Global.carrierSense: self.checkRespondTarget(),
-        }[self.state]'''
         self.channelBusyCount = 0
         if self.state == Global.sendPacket:
             return self.toIDLE()
@@ -241,9 +229,11 @@ class AP:
     
     def toIDLE(self):
         #self.channelBusyCount = 0
+        if self.state == Global.sendPacket:
+            Global.channelUser -= 1
         self.respondTarget = 0
         self.state = Global.IDLE
-        self.timeToNextTask = Eventlist.maxTime + 1
+        self.timeToNextTask = Global.maxTime +1
         for x in range(len(self.nodeInRange)):
             self.nodeInRange[x].channelBusyCount -= 1
             if (self.nodeInRange[x].channelBusyCount < 1) and (self.nodeInRange[x].state == Global.carrierSense):
@@ -267,22 +257,19 @@ class AP:
         
 
 
-# In[14]:
+# In[288]:
 
 from numpy import *
 class Eventlist:
-    currentTime = 0
-    collision = 0
-    maxTime = 0
+    #currentTime = 0
+    #collision = 0
+    #maxTime = 0
     def __init__(self, endTime):
         self.event = []
         self.workList = []
-        Eventlist.maxTime = fix(endTime*1000000/52)
-        self.nextTime = Eventlist.maxTime
-        
-        
-    def insert(self, e):
-        self.event.append(e)
+        Global.maxTime = fix(endTime*1000000/52)
+        self.nextTime = Global.beaconInterval
+
         
     def findNextTimeEvents(self, points):
         self.event = []
@@ -296,7 +283,7 @@ class Eventlist:
     
     def goToNextTime(self):
         Global.currentTime = self.nextTime
-        self.nextTime = Eventlist.maxTime
+        self.nextTime = Global.beaconInterval
         
     def changeState(self):
         for x in range(len(self.event)):
@@ -313,6 +300,17 @@ class Eventlist:
         for x in range(len(self.workList)):
            AP.receivePacket(self.workList[x].sendPacket())
         
+    def checkChannelState(self):
+        if Global.channelState == Global.IDLE:
+            if Global.channelUser > 0:
+                Global.channelBusyStartTime = Global.currentTime
+                Global.channelState = Global.carrierSense
+        elif Global.channelState == Global.carrierSense:
+            if Global.channelUser == 0:
+                Global.channelUsingTime = Global.channelUsingTime + (Global.currentTime - Global.channelBusyStartTime)
+                Global.channelState = Global.IDLE          
+        #print "check channel: %d" % Global.channelUser
+        
     
     def showList():
         for x in range(len(event)):
@@ -320,7 +318,28 @@ class Eventlist:
     
 
 
-# In[15]:
+# In[258]:
+
+from random import randint
+class DataInterval:
+    def __init__(self):
+        self.arrivalTimeList = [Global.maxTime]
+        self.nodeArrivalTime = [Global.maxTime]
+        
+    def checkDataArrival(self, points):
+        for x in range(1, len(points)):
+            if self.arrivalTimeList[x] < Global.currentTime:
+                points[x].dataInterval()
+                #print "data arrival: node %d" % points[x].AID
+                self.arrivalTimeList[x] = Global.currentTime + self.nodeArrivalTime[x]
+                
+    def getSamplingRate(self, points):
+        for x in range(1, len(points)):
+            self.nodeArrivalTime.append(fix(((60 * 1000000) / Global.slotTime) / points[x].samplingRate))
+            self.arrivalTimeList.append((randint(0 , 4) * Global.beaconTime) + self.nodeArrivalTime[x])
+
+
+# In[275]:
 
 class Statistic:
     
@@ -329,12 +348,16 @@ class Statistic:
     success = 0
 
 
-# In[16]:
+# In[286]:
 
 class Global:
     SIFS = 3
     DIFS = 5
     ACKTime = 5
+    slotTime = 52
+    dataRate = 0.65
+    
+    group = 4
     
     carrierSense = 635
     sendPacket = 531 
@@ -349,9 +372,21 @@ class Global:
     contentionWindow = 4
     nodeCounts = 0
     currentTime = 0
+    maxTime = 0
+    
+    beaconTime = fix((0.45 * 1000000) / slotTime)
+    beaconInterval = currentTime + beaconTime
+    rawTime = fix(beaconTime / group)
+    holdingPeriod = fix(rawTime * 0.2)
+    
+    channelUser = 0
+    channelBusyStartTime = 0
+    channelUsingTime = 0
+    channelState = IDLE
+    
 
 
-# In[17]:
+# In[279]:
 
 from random import choice, randint
 from numpy import *
@@ -360,38 +395,45 @@ DIFS = 5
 ACKTime = 5
 RADIUS = 1000
 SQUERE_RADIUS = RADIUS ** 2
-packetLengthList = [32, 64, 128]
-samplingRateList = [2, 4, 8, 16]
+packetLengthList = [64, 128, 256]
+samplingRateList = [2, 4, 8, 16, 32] #per minute
 points = []
 Global.nodeCounts = 0
 
-eventController = Eventlist(2)
+eventController = Eventlist(60)
+dataIntervalController = DataInterval()
 
-points.append(AP(0,0,4))
+points.append(AP(0,0,Global.group))
 
-while Global.nodeCounts < 50:
+while Global.nodeCounts < 100:
     x, y = randint(-RADIUS,RADIUS), randint(-RADIUS,RADIUS)
     if (x*x + y*y) <= SQUERE_RADIUS:
-        points.append(Node(x, y, 128, choice(samplingRateList), Global.nodeCounts))        
+        points.append(Node(x, y, choice(packetLengthList), choice(samplingRateList), Global.nodeCounts))        
 
 for node1 in range(1, len(points)):
     points[0].calcRange(points[node1])
     for node2 in range(node1+1, len(points)):
-        points[node1].calcRange(points[node2])        
-    #points[node1].displayNodesInRange()
+        points[node1].calcRange(points[node2])
+        
+dataIntervalController.getSamplingRate(points)
+
     
-while(Global.currentTime < Eventlist.maxTime):
-#for x in range(10):    
-    eventController.findNextTimeEvents(points)
-    eventController.goToNextTime()
-    print Global.currentTime
-    eventController.changeState()
-    eventController.sendTime(points[0])
+while Global.currentTime < Global.maxTime:
+    while Global.currentTime < min(Global.maxTime, Global.beaconInterval):
+        eventController.findNextTimeEvents(points)
+        eventController.goToNextTime()
+        #print Global.currentTime
+        eventController.changeState()
+        eventController.sendTime(points[0])
+        eventController.checkChannelState()
+    Global.beaconInterval = Global.currentTime + Global.beaconTime
+    print "beacon check, %d" % Global.currentTime
+    dataIntervalController.checkDataArrival(points)
 
 print "end"
 
 
-# In[18]:
+# In[282]:
 
 from numpy import *
 from __future__ import division
@@ -399,18 +441,23 @@ print Statistic.packetCount
 print Statistic.collisionTimes
 print Statistic.success
 print "collision probability: %f" % float(Statistic.collisionTimes / Statistic.packetCount)
+print "Throughput: %d" % (Statistic.success * 128)
+print "channel utilization: %f" % float(Global.channelUsingTime / Global.maxTime)
+#print Global.channelUsingTime
 for x in range(1,len(points)):
-    print "Node: %d, transmitt times: %d, collision times: %d" % (points[x].AID, points[x].transmittTimes, points[x].collision)
+    print "Node: %d, sampling rate: %d per min, packet length: %d, transmitt times: %d, collision times: %d, queuing data: %d" % (points[x].AID, points[x].samplingRate, points[x].packetLength, points[x].transmittTimes, points[x].collision, points[x].queuingData)
 
 
-# In[181]:
+# In[287]:
 
 #print points[5].timeToNextTask
 #print points[:]
 from numpy import *
-
+'''
 for x in range(len(points)):
-    print "X: %d, Y: %d" % (points[x].x, points[x].y)
+    print "X: %d, Y: %d" % (points[x].x, points[x].y)'''
+print fix(((60 * 1000000) / Global.slotTime) / points[3].samplingRate)
+print Global.rawTime
 
 
 # In[ ]:
