@@ -1,8 +1,9 @@
 
 # coding: utf-8
 
-# In[247]:
+# In[57]:
 
+from __future__ import division
 class Node:
     'Common base class for all nodes'
     '''
@@ -30,11 +31,11 @@ class Node:
         self.backoffStage = Global.contentionWindow
         self.backoffTime = 0#randint(0, 2 ** min(self.backoffStage, 10))
         self.tranTime = fix(((packetLength * 8) / Global.slotTime) / Global.dataRate)
-        self.queuingData = 1#randint(0, 1000)
+        self.queuingData = 0#randint(0, 1000)
         self.collision = 0
         self.AID = AID
         self.transmittTimes = 0
-        self.expectedUsingTimePerBeacon = fix((self.tranTime * (samplingRate / 60)) * Global.beacon_sec)
+        self.expectedUsingTimePerBeacon = float((self.tranTime * (samplingRate / 60)) * Global.beacon_sec)
         Global.nodeCounts += 1
         
     def sendPacket(self):
@@ -182,8 +183,9 @@ class Node:
         
 
 
-# In[248]:
+# In[105]:
 
+from __future__ import division
 class AP:
     'common access point'
     #DIVICE = "access point"
@@ -206,7 +208,7 @@ class AP:
         for groups in range(numOfGroup):
             self.group.append([self])
             self.groupWeight.append(1)
-            self.expectedGroupWeight.append(0)
+            self.expectedGroupWeight.append(1)
             self.groupUtilization.append(0)
             self.expectedGroupUtilization.append(0)
             self.incrementalGain.append(0)
@@ -280,7 +282,7 @@ class AP:
     def displayStatus(self):
         print "x: %d, y: %d,\nType: %s, number of group: %d" %(self.x, self.y, self.device, len(self.group))
         
-    def randomGroup(self, points):
+    def randomGrouping(self, points):
         for x in range(1, len(points)):
             choiceGroup = choice(self.group)
             while(len(choiceGroup) > (6000 / len(self.group))):
@@ -289,16 +291,40 @@ class AP:
     
     def loadBalancedGrouping(self, points):
         for x in range(1, len(points)):
+            self.recommandGroup = []
+            #print self.incremantalGain
             self.updateGain(points[x])
-            
+            for y in range(len(self.group)):
+                if self.incrementalGain[y] == max(self.incrementalGain):
+                    self.recommandGroup.append(self.group[y])
+            self.appendGroup = choice(self.recommandGroup)
+            self.appendGroup.append(points[x])
+            for y in range(len(self.group)):
+                if self.group[y] == self.appendGroup:
+                    self.groupWeight[y] = self.expectedGroupWeight[y]
+                    self.groupUtilization[y] = self.expectedGroupUtilization[y]
             
     def updateGain(self, node):
         for x in range(len(self.group)):
+            self.incrementalGain[x] = 0
+            if len(self.group[x]) < 2:
+                self.expectedGroupWeight[x] = 1
+            else:
+                self.expectedGroupWeight[x] = 0
+            self.expectedGroupUtilization[x] = 0
+            for y in range(1, len(self.group[x])):
+                self.expectedGroupWeight[x] = (self.expectedGroupWeight[x] + (self.group[x][y].samplingRate * Global.beacon_sec))
+                self.expectedGroupUtilization[x] = (self.expectedGroupUtilization[x] + self.group[x][y].expectedUsingTimePerBeacon)
+            #self.expectedGroupWeight[x] = (self.expectedGroupWeight[x] + (node.samplingRate * Global.beacon_sec))
+            self.expectedGroupWeight[x] = (1 / self.expectedGroupWeight[x])
+            self.expectedGroupUtilization[x] = ((self.expectedGroupUtilization[x] + node.expectedUsingTimePerBeacon) / (Global.beacon_sec / Global.group))
+            #self.expectedGroupUtilization[x] = min(self.expectedGroupUtilization, Global.rawTime)
+            self.incrementalGain[x] = (self.expectedGroupWeight[x] * (self.expectedGroupUtilization[x] - self.groupUtilization[x]))
             
         
 
 
-# In[249]:
+# In[106]:
 
 from numpy import *
 class Eventlist:
@@ -366,7 +392,7 @@ class Eventlist:
     
 
 
-# In[250]:
+# In[107]:
 
 from random import randint
 class DataInterval:
@@ -387,7 +413,7 @@ class DataInterval:
             self.arrivalTimeList.append((randint(0 , 4) * Global.beaconTime) + self.nodeArrivalTime[x])
 
 
-# In[251]:
+# In[112]:
 
 class Statistic:
     
@@ -396,7 +422,7 @@ class Statistic:
     success = 0
 
 
-# In[252]:
+# In[113]:
 
 class Global:
     SIFS = 3
@@ -438,7 +464,7 @@ class Global:
     
 
 
-# In[253]:
+# In[114]:
 
 from random import choice, randint
 from numpy import *
@@ -457,12 +483,13 @@ dataIntervalController = DataInterval()
 
 points.append(AP(0,0,Global.group))
 
-while Global.nodeCounts < 1000:
+while Global.nodeCounts < 100:
     x, y = randint(-RADIUS,RADIUS), randint(-RADIUS,RADIUS)
     if (x*x + y*y) <= SQUERE_RADIUS:
         points.append(Node(x, y, choice(packetLengthList), choice(samplingRateList), Global.nodeCounts))        
 
-points[0].randomGroup(points)
+#points[0].loadBalancedGrouping(points)
+points[0].randomGrouping(points)
 
 for x in range(Global.group):
     for node1 in range(1, len(points[0].group[x])):
@@ -497,7 +524,7 @@ while Global.currentTime < Global.maxTime:
 print "end"
 
 
-# In[254]:
+# In[115]:
 
 from numpy import *
 from __future__ import division
@@ -512,24 +539,36 @@ for x in range(1,len(points)):
     print "Node: %d, sampling rate: %d per min, packet length: %d, transmitt times: %d, collision times: %d, queuing data: %d" % (points[x].AID, points[x].samplingRate, points[x].packetLength, points[x].transmittTimes, points[x].collision, points[x].queuingData)
 
 
-# In[209]:
+# In[104]:
 
 #print points[5].timeToNextTask
 #print points[:]
 from numpy import *
+from __future__ import division
+#test1 = [1,4,3,2,1,4]
+test = 0
 '''
 for x in range(len(points)):
     print "X: %d, Y: %d" % (points[x].x, points[x].y)'''
 #print fix(((60 * 1000000) / Global.slotTime) / points[3].samplingRate)
-print Global.currentTime
+'''print Global.currentTime
 print Global.rawInterval
 print (Global.rawTime * 4)
 print Global.beaconTime
-#print points[0].group[1]
+'''
+#print points[0].group[2]
+for x in range(1, len(points[0].group[3])):
+    test += (points[0].group[3][x].samplingRate * points[0].group[3][x].packetLength)
+    
+print test
 #points[0].randomGroup(points)
 #print points[0].group[1][3]
-#print Global.group
-#print points[0].nodeInRange[0].DEVICE
+#print points[0].incrementalGain
+#print points[0].recommandGroup
+#print test1.index(max(test1))
+#print points[0].expectedGroupUtilization
+#print points[0].incrementalGain.index(max(points[0].incrementalGain))
+
     
 
 
