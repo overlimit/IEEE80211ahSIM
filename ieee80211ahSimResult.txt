@@ -1,0 +1,66 @@
+random grouping, nodes: 1000, time: 60sec
+
+send packets: 27182
+collision times: 15576
+transmitt success: 11605 
+collision probability: 0.573026
+Throughput: 1485440
+channel utilization: 0.624958
+
+send packets: 27356
+collision times: 15651
+transmitt success: 11704 
+collision probability: 0.572123
+Throughput: 1498112
+channel utilization: 0.605064
+
+nodes: 4000, time: 60sec, start queuing data: 0
+
+send packets: 36737
+collision times: 28130
+transmitt success: 8605 
+collision probability: 0.765713
+Throughput: 1101440
+channel utilization: 0.669222
+
+send packets: 36910
+collision times: 28222
+transmitt success: 8687 
+collision probability: 0.764617
+Throughput: 1111936
+channel utilization: 0.668655
+
+send packets: 36862
+collision times: 28112
+transmitt success: 8750 
+collision probability: 0.762628
+Throughput: 1120000
+channel utilization: 0.667252
+
+
+
+load balanced grouping, nodes: 1000, time: 60sec
+
+send packets: 27933
+collision times: 15971
+transmitt success: 11960 
+collision probability: 0.571761
+Throughput: 1530880
+channel utilization: 0.620891
+
+send packets: 27365
+collision times: 15719
+transmitt success: 11645 
+collision probability: 0.574420
+Throughput: 1490560
+channel utilization: 0.617856
+
+
+nodes: 4000, time: 60sec
+
+send packets: 36584
+collision times: 27910
+transmitt success: 8673 
+collision probability: 0.762902
+Throughput: 1110144
+channel utilization: 0.669381
